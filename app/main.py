@@ -1,17 +1,18 @@
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from enum import Enum
 from typing import Annotated, List, Optional
-from pydantic import EmailStr
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+
+from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from sqlmodel import Field, Relationship, Session, SQLModel, create_engine, select
-# Password hashing setup
+from pydantic import EmailStr
+from sqlmodel import Field, Relationship, Session, SQLModel, create_engine, select,col
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# ============================= SQL and Table Config ============================
+# ============================= SQL & DB Config ============================
 sqlite_file_name = "database.db"
 sqlite_url = f"sqlite:///{sqlite_file_name}"
 connect_args = {"check_same_thread": False}
@@ -29,8 +30,9 @@ async def lifespan(app: FastAPI):
     create_db_and_tables()
     yield
 
-# ============================== Multi-Tenant Models ============================
+app = FastAPI(lifespan=lifespan)
 
+# ============================== Data Models ============================
 class UserRole(str, Enum):
     ADMIN = "admin"
     MEMBER = "member"
@@ -47,10 +49,7 @@ class UserBase(SQLModel):
 class User(UserBase, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     hashed_password: str
-
-    tenants: List["Tenant"] = Relationship(
-        back_populates="users", link_model=TenantUserLink
-    )
+    tenants: List["Tenant"] = Relationship(back_populates="users", link_model=TenantUserLink)
 
 class UserCreate(UserBase):
     password: str
@@ -63,10 +62,7 @@ class TenantBase(SQLModel):
 
 class Tenant(TenantBase, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-
-    users: List[User] = Relationship(
-        back_populates="tenants", link_model=TenantUserLink
-    )
+    users: List[User] = Relationship(back_populates="tenants", link_model=TenantUserLink)
 
 class TenantCreate(TenantBase):
     pass
@@ -79,9 +75,47 @@ class AddMemberRequest(SQLModel):
     email: EmailStr
     role: UserRole = UserRole.MEMBER
 
-# ===================================== JWT & OAuth Config =================================
-app = FastAPI(lifespan=lifespan)
+class ItemOrderLink(SQLModel, table=True):
+    item_id: int = Field(foreign_key="item.id", primary_key=True)
+    order_id: int = Field(foreign_key="order.id", primary_key=True)
 
+class ItemBase(SQLModel):
+    name: str
+    details: Optional[str] = None
+    category: str
+
+class Item(ItemBase, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    orders: List["Order"] = Relationship(back_populates="items", link_model=ItemOrderLink)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    tenant_id: int = Field(foreign_key="tenant.id", index=True)
+
+class ItemCreate(ItemBase):
+    pass
+
+class ItemRead(ItemBase):
+    id: int
+    tenant_id: int
+    user_id: int
+
+class OrderBase(SQLModel):
+    order_date: date = Field(default_factory=date.today)
+
+class Order(OrderBase, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    items: List[Item] = Relationship(back_populates="orders", link_model=ItemOrderLink)
+    tenant_id: int = Field(foreign_key="tenant.id", index=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+
+class OrderCreate(SQLModel):
+    item_ids: List[int]
+
+class OrderRead(OrderBase):
+    id: int
+    user_id: int
+    tenant_id: int
+
+# ================================= Auth Config =================================
 SECRET_KEY = "mysecret"
 ALGORITHM = "HS256"
 OAuth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
@@ -145,10 +179,7 @@ async def login(
 ):
     user = session.exec(select(User).where(User.email == form_data.username)).first()
     if not user or not verify_password(form_data.password, user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid email or password",
-        )
+        raise HTTPException(status_code=400, detail="Invalid email or password")
     access_token = create_token({"sub": user.email})
     return {"access_token": access_token, "token_type": "bearer"}
 
@@ -159,11 +190,10 @@ def get_me(current_user: Annotated[User, Depends(verify_token)]):
 @app.post("/tenants/register", response_model=TenantRead, status_code=status.HTTP_201_CREATED, tags=["Tenant Management"])
 def register_tenant(
     tenant_data: TenantCreate,
-    current_user: Annotated[User, Depends(verify_token)], 
+    current_user: Annotated[User, Depends(verify_token)],
     session: Session = Depends(get_session),
 ):
-    statement = Tenant.name == tenant_data.name
-    existing_tenant = session.exec(select(Tenant).where(statement)).first()
+    existing_tenant = session.exec(select(Tenant).where(Tenant.name == tenant_data.name)).first()
     if existing_tenant:
         raise HTTPException(status_code=400, detail="Corporation name already registered")
 
@@ -172,33 +202,16 @@ def register_tenant(
     session.commit()
     session.refresh(tenant)
 
-    link = TenantUserLink(
-        tenant_id=tenant.id,
-        user_id=current_user.id,
-        role=UserRole.ADMIN
-    )
+    link = TenantUserLink(tenant_id=tenant.id, user_id=current_user.id, role=UserRole.ADMIN)
     session.add(link)
     session.commit()
 
     return TenantRead(id=tenant.id, name=tenant.name, role=UserRole.ADMIN)
 
-@app.get("/users/me/tenants", response_model=List[TenantRead], tags=["User Workspace"])
-def get_my_tenants(
-    current_user: Annotated[User, Depends(verify_token)],
-    session: Session = Depends(get_session)
-):
-    links = session.exec(select(TenantUserLink).where(TenantUserLink.user_id == current_user.id)).all()
-    
-    result = []
-    for link in links:
-        tenant = session.get(Tenant, link.tenant_id)
-        result.append(TenantRead(id=tenant.id, name=tenant.name, role=link.role))
-    return result
-
-@app.post("/tenants/{tenant_id}/members", tags=["Tenant Admin Actions"])
-def add_member_to_tenant(
+@app.post("/tenants/{tenant_id}/item", response_model=ItemRead, tags=["Tenant Items"])
+def create_item(
     tenant_id: int,
-    payload: AddMemberRequest,
+    item_data: ItemCreate,
     current_user: Annotated[User, Depends(verify_token)],
     session: Session = Depends(get_session)
 ):
@@ -210,27 +223,37 @@ def add_member_to_tenant(
         )
     ).first()
     if not admin_link:
-        raise HTTPException(status_code=403, detail="Only Tenant Admins can add members to this workspace")
+        raise HTTPException(status_code=403, detail="Only Tenant Admins can add items")
 
-    target_user = session.exec(select(User).where(User.email == payload.email)).first()
-    if not target_user:
-        raise HTTPException(status_code=404, detail="User with this email does not exist")
-
-    existing_link = session.exec(
-        select(TenantUserLink).where(
-            TenantUserLink.tenant_id == tenant_id,
-            TenantUserLink.user_id == target_user.id
-        )
-    ).first()
-    if existing_link:
-        raise HTTPException(status_code=400, detail="User is already a member of this workspace")
-
-    new_link = TenantUserLink(
-        tenant_id=tenant_id,
-        user_id=target_user.id,
-        role=payload.role
+    db_item = Item(
+        **item_data.model_dump(),
+        user_id=current_user.id,
+        tenant_id=tenant_id
     )
-    session.add(new_link)
+    session.add(db_item)
     session.commit()
+    session.refresh(db_item)
+    return db_item
+@app.post("/Order/", response_model=OrderRead, tags=["Orders"])
+def create_order(
+    order_data: OrderCreate,
+    current_user: Annotated[User, Depends(verify_token)],
+    session: Session = Depends(get_session)
+):
+    if not order_data.item_ids:
+        raise HTTPException(status_code=400, detail="Order must contain item IDs")
 
-    return {"message": f"Successfully added {target_user.email} as {payload.role.value} to workspace."}
+    # Fetch matching items from DB
+    items = session.exec(select(Item).where(col(Item.id).in_(order_data.item_ids))).all()
+    if len(items) != len(order_data.item_ids):
+        raise HTTPException(status_code=404, detail="One or more item IDs were not found")
+
+    tenant_id = items[0].tenant_id
+
+    db_order = Order(user_id=current_user.id, tenant_id=tenant_id)
+    db_order.items = items
+
+    session.add(db_order)
+    session.commit()
+    session.refresh(db_order)
+    return db_order
