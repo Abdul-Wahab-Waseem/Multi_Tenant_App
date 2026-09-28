@@ -257,3 +257,23 @@ def create_order(
     session.commit()
     session.refresh(db_order)
     return db_order
+@app.get("/Tenant/{tenant_id}/orders",response_model=List[OrderRead])
+def read_orders(
+    current_user:Annotated[User,Depends(verify_token)],
+    tenant_id: int,
+    session: Session = Depends(get_session)
+):
+    admin_link = session.exec(
+        select(TenantUserLink).where(
+            TenantUserLink.tenant_id == tenant_id,
+            TenantUserLink.user_id == current_user.id,
+            TenantUserLink.role == UserRole.ADMIN
+        )
+    ).first()
+    if not admin_link:
+        raise HTTPException(
+            status_code=403,
+            detail="Only Tenant Admin Can See Their Orders"
+        )
+    orders = session.exec(select(Order).where(Order.tenant_id == tenant_id)).all()
+    return orders
