@@ -288,6 +288,39 @@ def update_item(
 
     return item
 
+@app.delete(
+        "/Tenant/{tenant_id}/Items/{item_id}",
+        status_code=status.HTTP_200_OK,
+        tags=["Tenant Items"]
+)
+def del_item(
+    tenant_id: int,
+    item_id: int,
+    current_user: Annotated[User,Depends(verify_token)],
+    session: Session = Depends(get_session)
+):
+    admin_link = session.exec(
+        select(TenantUserLink).where(
+            TenantUserLink.tenant_id == tenant_id,
+            TenantUserLink.user_id == current_user.id,
+            TenantUserLink.role == UserRole.ADMIN
+        )
+    ).first()
+    if not admin_link:
+        raise HTTPException(status_code=403, detail="Only Tenant Admins can Delete items")
+
+    item = session.exec(select(Item).where(Item.id == item_id, Item.tenant_id == tenant_id)).first()
+    if not item:
+        raise HTTPException(
+            status_code=403,
+            detail="There is not such item exists"
+        )
+    session.delete(item)
+    session.commit()
+    return{
+        "ok": True
+    }
+
 @app.post("/Order/", response_model=OrderRead, tags=["Orders"])
 def create_order(
     order_data: OrderCreate,
@@ -298,7 +331,9 @@ def create_order(
         raise HTTPException(status_code=400, detail="Order must contain item IDs")
 
     # Fetch matching items from DB
-    items = session.exec(select(Item).where(col(Item.id).in_(order_data.item_ids))).all()
+    items = session.exec(
+        select(Item).where(Item.__table__.c.id.in_(order_data.item_ids))
+    ).all()
     if len(items) != len(order_data.item_ids):
         raise HTTPException(status_code=404, detail="One or more item IDs were not found")
 
