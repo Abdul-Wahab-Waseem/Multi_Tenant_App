@@ -8,7 +8,7 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import EmailStr
-from sqlmodel import Field, Relationship, Session, SQLModel, create_engine, select,col
+from sqlmodel import Field, Relationship, Session, SQLModel, create_engine, select
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -213,7 +213,7 @@ def register_tenant(
 
     return TenantRead(id=tenant.id, name=tenant.name, role=UserRole.ADMIN)
 
-@app.post("/tenants/{tenant_id}/item", response_model=ItemRead, tags=["Tenant Items"])
+@app.post("/tenants/{tenant_id}/items", response_model=ItemRead, tags=["Tenant Items"])
 def create_item(
     tenant_id: int,
     item_data: ItemCreate,
@@ -240,7 +240,7 @@ def create_item(
     session.refresh(db_item)
     return db_item
 
-@app.get("/Dashboard/Items",response_model=List[ItemRead],tags=["Dashboard"])
+@app.get("/dashboard/items",response_model=List[ItemRead],tags=["Dashboard"])
 def dashboard(
     session: Session = Depends(get_session)
 ):
@@ -253,7 +253,7 @@ def dashboard(
     return items
 
 @app.patch(
-        "/Tenant/{tenant_id}/Items/{item_id}",
+        "/tenants/{tenant_id}/items/{item_id}",
         response_model=ItemRead,
         tags=["Tenant Items"])
 def update_item(
@@ -289,7 +289,7 @@ def update_item(
     return item
 
 @app.delete(
-        "/Tenant/{tenant_id}/Items/{item_id}",
+        "/tenants/{tenant_id}/items/{item_id}",
         status_code=status.HTTP_200_OK,
         tags=["Tenant Items"]
 )
@@ -321,7 +321,7 @@ def del_item(
         "ok": True
     }
 
-@app.post("/Order/", response_model=OrderRead, tags=["Orders"])
+@app.post("/orders", response_model=OrderRead, tags=["Orders"])
 def create_order(
     order_data: OrderCreate,
     current_user: Annotated[User, Depends(verify_token)],
@@ -346,7 +346,7 @@ def create_order(
     session.commit()
     session.refresh(db_order)
     return db_order
-@app.get("/Tenant/{tenant_id}/orders",response_model=List[OrderRead],tags=["Tenant Orders"])
+@app.get("/tenants/{tenant_id}/orders",response_model=List[OrderRead],tags=["Tenant Orders"])
 def read_orders(
     current_user:Annotated[User,Depends(verify_token)],
     tenant_id: int,
