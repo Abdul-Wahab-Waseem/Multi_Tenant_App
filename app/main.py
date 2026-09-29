@@ -234,6 +234,19 @@ def create_item(
     session.commit()
     session.refresh(db_item)
     return db_item
+
+@app.get("/Dashboard/Items",response_model=List[ItemRead],tags=["Dashboard"])
+def dashboard(
+    session: Session = Depends(get_session)
+):
+    items = session.exec(select(Item)).all()
+    if not items:
+        raise HTTPException(
+            status_code= 400,
+            detail="No items Exist"
+        )
+    return items
+
 @app.post("/Order/", response_model=OrderRead, tags=["Orders"])
 def create_order(
     order_data: OrderCreate,
@@ -257,7 +270,7 @@ def create_order(
     session.commit()
     session.refresh(db_order)
     return db_order
-@app.get("/Tenant/{tenant_id}/orders",response_model=List[OrderRead])
+@app.get("/Tenant/{tenant_id}/orders",response_model=List[OrderRead],tags=["Tenant Orders"])
 def read_orders(
     current_user:Annotated[User,Depends(verify_token)],
     tenant_id: int,
