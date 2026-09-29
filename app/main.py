@@ -275,6 +275,32 @@ def register_tenant(
     return TenantRead(id=tenant.id, name=tenant.name, role=UserRole.ADMIN)
 
 
+@app.get("/tenants/{tenant_id}/items", response_model=List[ItemRead], tags=["Tenant Items"])
+def read_items(
+    tenant_id: int,
+    current_user: Annotated[User,Depends(verify_token)],
+    session: Session = Depends(get_session)
+):
+    admin_link = session.exec(
+        select(TenantUserLink).where(
+            TenantUserLink.tenant_id == tenant_id,
+            TenantUserLink.user_id == current_user.id,
+            TenantUserLink.role == UserRole.ADMIN,
+        )
+    ).first()
+    if not admin_link:
+        raise HTTPException(status_code=403, detail="Only Tenant Admins can see There items")
+
+    items = session.exec(select(Item).where(Item.tenant_id == tenant_id)).all()
+    if not items:
+        raise HTTPException(
+            status_code=404,
+            detail="No-Content"
+        )
+
+    return items
+
+
 @app.post("/tenants/{tenant_id}/items", response_model=ItemRead, tags=["Tenant Items"])
 def create_item(
     tenant_id: int,
