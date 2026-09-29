@@ -98,6 +98,11 @@ class ItemRead(ItemBase):
     tenant_id: int
     user_id: int
 
+class ItemUpdate(SQLModel):
+    name: Optional[str] = None
+    details: Optional[str] = None
+    category: Optional[str] = None
+
 class OrderBase(SQLModel):
     order_date: date = Field(default_factory=date.today)
 
@@ -246,6 +251,42 @@ def dashboard(
             detail="No items Exist"
         )
     return items
+
+@app.patch(
+        "/Tenant/{tenant_id}/Items/{item_id}",
+        response_model=ItemRead,
+        tags=["Tenant Items"])
+def update_item(
+    item_data: ItemUpdate,
+    current_user: Annotated[User,Depends(verify_token)],
+    tenant_id: int,
+    item_id: int,
+    session: Session = Depends(get_session)
+):
+    admin_link = session.exec(
+        select(TenantUserLink).where(
+            TenantUserLink.tenant_id == tenant_id,
+            TenantUserLink.user_id == current_user.id,
+            TenantUserLink.role == UserRole.ADMIN
+        )
+    ).first()
+    if not admin_link:
+        raise HTTPException(status_code=403, detail="Only Tenant Admins can add items")
+    statement = select(Item).where(item_id == Item.id, Item.tenant_id == tenant_id)
+    item = session.exec(statement).first()
+    if not item:
+        raise HTTPException(
+            status_code=403,
+            detail="There is no such an item exists"
+        )
+    updated_item = item_data.model_dump(exclude_unset=True)
+    item.sqlmodel_update(updated_item)
+
+    session.add(item)
+    session.commit()
+    session.refresh(item)
+
+    return item
 
 @app.post("/Order/", response_model=OrderRead, tags=["Orders"])
 def create_order(
