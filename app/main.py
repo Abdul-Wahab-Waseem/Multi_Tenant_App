@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
 from enum import Enum
@@ -13,11 +14,12 @@ from sqlmodel import Field, Relationship, Session, SQLModel, create_engine, sele
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # ============================= SQL & DB Config ============================
-sqlite_file_name = "database.db"
-sqlite_url = f"sqlite:///{sqlite_file_name}"
-connect_args = {"check_same_thread": False}
-engine = create_engine(sqlite_url, connect_args=connect_args)
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql://neondb_owner:npg_HKci2ZT3vUzk@ep-flat-block-b5g8frbk-pooler.c-7.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+)
 
+engine = create_engine(DATABASE_URL)
 
 def create_db_and_tables():
     SQLModel.metadata.create_all(engine)
