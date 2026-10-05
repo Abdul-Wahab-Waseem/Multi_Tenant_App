@@ -14,12 +14,9 @@ from sqlmodel import Field, Relationship, Session, SQLModel, create_engine, sele
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # ============================= SQL & DB Config ============================
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://neondb_owner:npg_HKci2ZT3vUzk@ep-flat-block-b5g8frbk-pooler.c-7.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
-)
+DATABASE_URL="postgresql://postgres:app@localhost:5433/postgres"
 
-engine = create_engine(DATABASE_URL)
+engine = create_engine(DATABASE_URL,echo=True)
 
 def create_db_and_tables():
     SQLModel.metadata.create_all(engine)
